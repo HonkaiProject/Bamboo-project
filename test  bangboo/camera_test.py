@@ -4,11 +4,19 @@ import face_recognition
 import torch
 import json
 import threading
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from collections import deque
+
+model_name = "gpt2"
+model = GPT2LMHeadModel.from_pretrained(model_name)
+tokenizer = GPT2Tokenizer.from_pretrained(model_name)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model_yolo = torch.hub.load("ultralytics/yolov5", "yolov5n", pretrained=True).to(device)
 
 MEMORY_FILE = os.path.join(os.getcwd(), "bangboo_memory.json")
+CONVERSATION_HISTORY_FILE = "conversation_history.json"
+short_term_memory = deque(maxlen = 1000)
 
 known_face_encodings = []
 known_face_names = []
@@ -66,6 +74,68 @@ def load_memory():
 
 memory = load_memory()
 
+def generate_bamboo_reply(context):
+    input_ids = tokenizer.encode(context, return_tensors = "pt")
+    output = model.generate(
+        input_ids,
+        max_length = 512,
+        num_return_sequences = 1,
+        no_repeat_ngram_size = 2,
+        top_k = 50,
+        top_p = 0.9,
+        temperature = 0.8
+    )
+    
+    reply = tokenizer.decode(output[0], skip_special_tokens = True).strip()
+    return reply
+
+def generate_woongna_response(user_input):
+    context = "\n".join(short_term_memory) + f"\nUser : {user_input}\nBangboo : "
+    gpt2_reply = generate_bamboo_reply(context)
+    
+    if "?" in gpt2_reply:
+        symbol = "?"
+    elif "!" in gpt2_reply:
+        symbol = "!"
+    else:
+        symbol = "."
+        
+    response_length = len(user_input)
+    woongna = "웅" + "나" * (response_length // 3 + 2)
+    
+    if woongna.count("나") > 3:
+        woongna_list = ["웅나" for _ in range((response_length // 3) + 1)]
+        woongna = " ".join(woongna_list)
+
+    final_response = f"{woongna}{symbol} ({gpt2_reply})"
+    return final_response
+
+def save_memory(memory):
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(memory, f, indent = 4)
+    
+def load_memory():
+    try:
+        with open(MEMORY_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    
+def save_conversation_history(history):
+    with open(CONVERSATION_HISTORY_FILE, "w") as f:
+        json.dump(list(history), f, indent = 4)
+           
+def load_conversation_history():
+    try:
+        with open(CONVERSATION_HISTORY_FILE, "r") as f:
+            history = json.load(f)
+            return deque(history, maxlen = 1000)
+    except FileNotFoundError:
+        return deque(maxlen = 1000)
+    
+memory = load_memory()
+short_term_memory = load_conversation_history()
+
 # 기억 관련 함수
 def save_user_memory(user_id, key, value):
     if user_id not in memory:
@@ -93,6 +163,11 @@ def bangboo_reply(user_id, user_input, frame=None):
         user_name = user_input.split("이름은 ")[-1].strip()
         save_user_memory(user_id, "name", user_name)
         return f"반가워요, {user_name}! 이제 이름을 기억할게요!"
+    
+    woongna_response = generate_woongna_response(user_input)
+    short_term_memory.append(f"User : {user_input}")
+    short_term_memory.append(f"Bangboo : {woongna_response}")
+    return woongna_response
 
 def capture_camera():
     cap = cv2.VideoCapture(0)
@@ -141,13 +216,13 @@ def capture_camera():
 
 def start_bangboo_camera():
     user_id = "test_user"
-    print("Bangboo: 반가워요! 카메라를 실행할게요.")
+    print("Bangboo : 웅나!, 웅나나. 웅나! (안녕하세요!, 저는 bangboo에요. 잘부탁드려요!)")
 
     cap = cv2.VideoCapture(0)
     while True:
-        user_input = input("사용자: ")
+        user_input = input("사용자 : ")
         if user_input.lower() in ["끝", "종료", "bye", "바이", "exit", "stop"]:
-            print("Bangboo: 카메라를 종료할게요.")
+            print("Bangboo : 웅나! (다음에 또 만나요!)")
             break
 
         ret, frame = cap.read()
